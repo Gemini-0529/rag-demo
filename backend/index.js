@@ -104,11 +104,11 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
  */
 app.post('/ask', async (req, res) => {
   try {
-    const { question, stream = true } = req.body || {}
+    const { question, stream = true, history = [] } = req.body || {}
 
     // 非流式：兼容旧用法
     if (stream === false) {
-      const { answer, citations } = await askQuestion(question)
+      const { answer, citations } = await askQuestion(question, history)
       return res.json({ code: 200, answer, citations })
     }
 
@@ -129,6 +129,7 @@ app.post('/ask', async (req, res) => {
       // 把生成的内容逐段返回给前端
       // onDelta 是前端传入的回调函数，用于处理生成的内容
       onDelta: (content) => send({ type: 'delta', content }),
+      history
     })
 
     send({ type: 'done' })

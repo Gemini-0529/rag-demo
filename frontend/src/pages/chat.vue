@@ -51,7 +51,13 @@ async function readAskStream(questionText, onEvent) {
   const res = await fetch('/api/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question: questionText }),
+    body: JSON.stringify({
+      question: questionText,
+      history: messages.value
+        .slice(0, -2) // 不含本轮提问和空回答
+        .map((m) => ({role: m.role, content: m.content.trim()})), // 去掉回答的 citations 数据
+      stream: true
+    }),
   })
 
   if (!res.ok) {
@@ -91,6 +97,7 @@ async function readAskStream(questionText, onEvent) {
 }
 
 const sendMessage = async () => {
+  if (loading.value) return
   const q = question.value.trim()
   if (!q) {
     ElMessage.warning('请输入问题')
@@ -128,8 +135,12 @@ const sendMessage = async () => {
     scrollToBottom()
   } catch (err) {
     ElMessage.error(err.message || '问答失败')
-    if (!messages.value[assistantIndex]?.content) {
-      messages.value.pop()
+    const msg = messages.value[assistantIndex]
+    if(msg) {
+      msg.content = msg.content?.trim()
+        ? msg.content
+        : '回答出现了小差错，请重试。'
+      msg.citations = []
     }
   } finally {
     loading.value = false

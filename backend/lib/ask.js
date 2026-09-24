@@ -27,7 +27,7 @@ function validateQuestion(question) {
 /**
  * 检索 + 组装 messages / citations（流式与非流式共用）
  */
-async function prepareAsk(question) {
+async function prepareAsk(question, history) {
   const q = validateQuestion(question)
 
   // 1) 问题向量化
@@ -58,9 +58,16 @@ async function prepareAsk(question) {
     `用户问题：${q}`,
   ].join('\n')
 
+  // 清洗history
+  const cleanHistory = (history || [])
+    .map((m) => ({role: m.role, content: m.content.trim()})) // 去掉回答的 citations 数据
+    .filter((m) => m.content)
+    .slice(-8) // 滑动窗口：最近 4 轮（8 条）
+
   // OpenAI 兼容接口的 messages 格式：system 定规矩，user 给材料与问题
   const messages = [
     { role: 'system', content: systemPrompt },
+    ...cleanHistory,
     { role: 'user', content: userPrompt },
   ]
 
@@ -77,8 +84,8 @@ async function prepareAsk(question) {
 /**
  * 非流式：等模型整段生成完再返回
  */
-export async function askQuestion(question) {
-  const { messages, citations } = await prepareAsk(question)
+export async function askQuestion(question, history) {
+  const { messages, citations } = await prepareAsk(question, history)
 
   const completion = await chatClient.chat.completions.create({
     model: CHAT_MODEL,
@@ -97,8 +104,8 @@ export async function askQuestion(question) {
  * @param {string} question
  * @param {{ onCitations: Function, onDelta: Function }} handlers
  */
-export async function askQuestionStream(question, { onCitations, onDelta }) {
-  const { messages, citations } = await prepareAsk(question)
+export async function askQuestionStream(question, { onCitations, onDelta, history=[] }) {
+  const { messages, citations } = await prepareAsk(question, history)
 
   // 检索完成后立刻把引用发给前端（回答还在生成中）
   onCitations?.(citations)
