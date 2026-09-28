@@ -251,14 +251,28 @@ const regenerateAnswer = async (idx) => {
               </template>
             </div>
             <div v-if="msg.citations?.length" class="citations">
-              <div class="citations-title">引用原文 Top 3</div>
               <div
-                v-for="c in msg.citations"
-                :key="c.chunkIndex"
-                class="citation-item"
+                class="citations-title"
+                @click="msg.citationsOpen = !msg.citationsOpen"
               >
-                <span class="meta">#{{ c.chunkIndex }} · {{ c.score }}</span>
-                <div class="md" v-html="renderMarkdown(c.text)" />
+                <span>引用原文 Top {{ msg.citations.length }}</span>
+                <el-icon class="citations-toggle" :class="{ open: msg.citationsOpen }">
+                  <ArrowDown />
+                </el-icon>
+              </div>
+              <div class="citations-collapse" :class="{ open: msg.citationsOpen }">
+                <div class="citations-collapse-inner">
+                  <div class="citations-body">
+                    <div
+                      v-for="c in msg.citations"
+                      :key="c.chunkIndex"
+                      class="citation-item"
+                    >
+                      <span class="meta">#{{ c.chunkIndex }} · {{ c.score }}</span>
+                      <div class="md" v-html="renderMarkdown(c.text)" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -502,11 +516,50 @@ main {
         border: 1px solid #dce8f4;
 
         .citations-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
           font-weight: 600;
-          margin-bottom: 8px;
           color: #3d5470;
           letter-spacing: 0.08em;
           font-size: 12px;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .citations-toggle {
+          flex-shrink: 0;
+          font-size: 14px;
+          color: #8aa0b8;
+          transition: transform 0.2s ease;
+          &.open {
+            transform: rotate(180deg);
+          }
+        }
+
+        .citations-collapse {
+          display: grid;
+          grid-template-rows: 0fr;
+          transition: grid-template-rows 0.22s ease;
+          &.open {
+            grid-template-rows: 1fr;
+          }
+        }
+
+        .citations-collapse-inner {
+          overflow: hidden;
+          min-height: 0;
+        }
+
+        .citations-body {
+          margin-top: 8px;
+          opacity: 0;
+          transition: opacity 0.2s ease;
+        }
+
+        .citations-collapse.open .citations-body {
+          opacity: 1;
         }
 
         .citation-item {
