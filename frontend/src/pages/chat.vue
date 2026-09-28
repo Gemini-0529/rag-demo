@@ -146,6 +146,51 @@ const sendMessage = async () => {
     loading.value = false
   }
 }
+const regenerateAnswer = async (idx) => {
+  if (loading.value) return
+  if (!fileList.value.length) {
+    ElMessage.warning('请先上传文档')
+    return
+  }
+
+  // 找到刚刚提问的问题
+  const question = messages.value.at(idx - 1)
+  if(question && question.role === 'user') {
+    loading.value = true
+    messages.value = messages.value.slice(0, idx) // 把后面的对话全删掉，避免上下文数据不对
+    messages.value.push({ role: 'assistant', content: '', citations: [] })
+    const assistantIndex = messages.value.length - 1
+    scrollToBottom()
+
+    try {
+      await readAskStream(question.content, (event) => {
+        const msg = messages.value[assistantIndex]
+        if (event.type === 'citations') {
+          msg.citations = event.citations || []
+          scrollToBottom()
+        } else if (event.type === 'delta') {
+          msg.content += event.content || ''
+          scrollToBottom()
+        } else if (event.type === 'error') {
+          throw new Error(event.message || '问答失败')
+        }
+      })
+      scrollToBottom()
+    } catch (err) {
+      ElMessage.error(err.message || '问答失败')
+      const msg = messages.value[assistantIndex]
+      if(msg) {
+        msg.content = msg.content?.trim()
+          ? msg.content
+          : '回答出现了小差错，请重试。'
+        msg.citations = []
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+  
+}
 </script>
 <template>
   <div class="page">
@@ -187,14 +232,23 @@ const sendMessage = async () => {
                   <i /><i /><i />
                 </span>
               </div>
-              <el-icon
-                v-if="msg.role === 'assistant' && msg.content"
-                class="copy-icon"
-                title="复制回答"
-                @click="copyAnswer(msg.content)"
-              >
-                <DocumentCopy />
-              </el-icon>
+              <template v-if="msg.role === 'assistant' && msg.content">
+                <el-icon
+                  class="copy-icon"
+                  title="复制回答"
+                  @click="copyAnswer(msg.content)"
+                >
+                  <DocumentCopy />
+                </el-icon>
+                <el-icon
+                  class="refresh-icon"
+                  title="重新生成"
+                  @click="regenerateAnswer(idx)"
+                >
+                  <Refresh />
+                </el-icon>
+                
+              </template>
             </div>
             <div v-if="msg.citations?.length" class="citations">
               <div class="citations-title">引用原文 Top 3</div>
@@ -424,7 +478,8 @@ main {
         }
       }
 
-      .copy-icon {
+      .copy-icon,
+      .refresh-icon {
         flex-shrink: 0;
         font-size: 16px;
         color: #8aa0b8;
