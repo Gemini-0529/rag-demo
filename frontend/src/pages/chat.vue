@@ -3,6 +3,7 @@ import { nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import UploadFile from '../components/uploadFile.vue'
+import { getCurrentId, getDataList, createData, updateData } from '../stores/handleData.js'
 
 marked.setOptions({
   gfm: true,
@@ -112,7 +113,6 @@ const sendMessage = async () => {
   question.value = ''
   loading.value = true
   scrollToBottom()
-
   // 先插入空的助手气泡，后续边收边追加文字（必须改 messages 里的项，保证响应式）
   messages.value.push({ role: 'assistant', content: '', citations: [] })
   // 助手气泡的索引
@@ -133,6 +133,7 @@ const sendMessage = async () => {
       }
     })
     scrollToBottom()
+    
   } catch (err) {
     ElMessage.error(err.message || '问答失败')
     const msg = messages.value[assistantIndex]
@@ -144,6 +145,25 @@ const sendMessage = async () => {
     }
   } finally {
     loading.value = false
+    // 更新对话数据
+    if (!currentId.value) return
+    const patch = {
+      messages: messages.value,
+      updatedAt: Date.now(),
+    }
+    const prev = conversations.value.find(
+      (c) => String(c.id) === String(currentId.value)
+    )
+    // 只有默认标题时写一次
+    if (!prev?.title || prev.title === '新对话') {
+      const firstMsg = messages.value[0]
+      if (firstMsg?.role === 'user') {
+        const t = firstMsg.content.trim()
+        patch.title = t.length > 10 ? t.slice(0, 10) + '...' : t
+      }
+    }
+    updateData(currentId.value, patch)
+    conversations.value = getDataList()
   }
 }
 const regenerateAnswer = async (idx) => {
@@ -191,11 +211,87 @@ const regenerateAnswer = async (idx) => {
   }
   
 }
+
+/** 侧栏是否展开；收起时只显示图标，悬停看完整标题 */
+const isExpanded = ref(true)
+
+/** 会话列表（来自 localStorage；新建/切换逻辑后续再接） */
+const conversations = ref(getDataList())
+const currentId = ref(getCurrentId())
+
+const formatHistoryTime = (ts) => {
+  if (!ts) return ''
+  const d = new Date(Number(ts))
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfThatDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const dayDiff = Math.round((startOfToday - startOfThatDay) / 86400000)
+  if (dayDiff === 0) return '今天'
+  if (dayDiff === 1) return '昨天'
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${mm}-${dd}`
+}
+
+// 新建对话
+const createConversation = () => {
+  currentId.value = Date.now()
+  const title = '新对话'
+  const updatedAt = currentId.value
+  const messages = []
+  createData(currentId.value, { title, updatedAt, messages })
+  conversations.value = getDataList()
+  currentId.value = conversations.value.at(-1).id
+}
 </script>
 <template>
   <div class="page">
     <div class="glow glow-a" />
     <div class="glow glow-b" />
+
+    <aside class="sidebar" :class="{ collapsed: !isExpanded }">
+      <button
+        type="button"
+        class="new-chat-btn"
+        :title="isExpanded ? '' : '新建对话'"
+        @click="createConversation"
+      >
+        <el-icon :size="20"><Plus /></el-icon>
+        <span v-show="isExpanded">新建对话</span>
+      </button>
+      <div v-show="isExpanded" class="history-label">历史对话</div>
+      <ul class="history-list">
+        <li
+          v-for="item in conversations"
+          :key="item.id"
+          class="history-item"
+          :class="{ active: String(item.id) === String(currentId) }"
+          :title="item.title || '新对话'"
+        >
+          <el-icon class="history-icon" :size="18"><ChatDotRound /></el-icon>
+          <div class="history-meta">
+            <span class="history-title">{{ item.title || '新对话' }}</span>
+            <span class="history-time">{{ formatHistoryTime(item.updatedAt) }}</span>
+          </div>
+        </li>
+        <li v-if="isExpanded && !conversations.length" class="history-empty">
+          暂无历史对话
+        </li>
+      </ul>
+      <button
+        type="button"
+        class="expand-btn"
+        :title="isExpanded ? '收起侧栏' : '展开侧栏'"
+        @click="isExpanded = !isExpanded"
+      >
+        <el-icon :size="22">
+          <Fold v-if="isExpanded" />
+          <Expand v-else />
+        </el-icon>
+      </button>
+    </aside>
+
     <div class="container">
       <header>
         <div class="brand">
@@ -298,6 +394,8 @@ const regenerateAnswer = async (idx) => {
 <style scoped lang="less">
 .page {
   min-height: 100vh;
+  height: 100vh;
+  display: flex;
   background:
     radial-gradient(900px 480px at 8% -8%, rgba(56, 160, 255, 0.16), transparent 55%),
     radial-gradient(700px 420px at 100% 0%, rgba(99, 180, 255, 0.12), transparent 50%),
@@ -327,16 +425,203 @@ const regenerateAnswer = async (idx) => {
   }
 }
 
+.sidebar {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border-right: 1px solid #d5e4f4;
+  backdrop-filter: blur(10px);
+  transition: width 0.22s ease, padding 0.22s ease;
+
+  &.collapsed {
+    width: 72px;
+    padding: 16px 10px;
+    align-items: center;
+
+    .new-chat-btn,
+    .expand-btn {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      gap: 0;
+    }
+
+    .history-list {
+      align-items: center;
+      width: 100%;
+    }
+
+    .history-item {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .history-meta {
+      display: none;
+    }
+
+    .history-icon {
+      margin: 0;
+      color: #5b7190;
+    }
+
+    .history-item.active .history-icon {
+      color: #2b8cff;
+    }
+  }
+}
+
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(135deg, #2b7fff, #3ab4ff);
+  transition: filter 0.15s, transform 0.15s, width 0.22s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  &:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+  }
+}
+
+.history-label {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #7a8ea6;
+}
+
+.history-empty {
+  padding: 16px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #8aa0b8;
+  list-style: none;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #b7cbe0 transparent;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: rgba(43, 140, 255, 0.06);
+  }
+
+  &.active {
+    background: #fff;
+    border-color: #d5e4f4;
+    box-shadow: 0 4px 12px rgba(30, 64, 110, 0.06);
+  }
+
+  .history-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: #8aa0b8;
+  }
+
+  &.active .history-icon {
+    color: #2b8cff;
+  }
+
+  .history-meta {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .history-title {
+    font-size: 13px;
+    color: #1b2a41;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .history-time {
+    font-size: 11px;
+    color: #8aa0b8;
+  }
+}
+
+.expand-btn {
+  flex-shrink: 0;
+  align-self: center;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 44px;
+  border: 1px solid #d5e4f4;
+  border-radius: 12px;
+  background: #fff;
+  color: #2b8cff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  &:hover {
+    background: rgba(43, 140, 255, 0.08);
+    border-color: #b7d4f5;
+    color: #1f6feb;
+  }
+}
+
 .container {
   position: relative;
   z-index: 1;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   margin: 0 auto;
   gap: 10px;
   height: 100vh;
-  width: min(880px, 92vw);
-  padding: 14px 8px 16px;
+  width: 100%;
+  max-width: 880px;
+  padding: 14px 20px 16px;
 }
 
 header {
