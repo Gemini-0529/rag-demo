@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import UploadFile from '../components/uploadFile.vue'
@@ -218,6 +218,11 @@ const isExpanded = ref(true)
 /** 会话列表（来自 localStorage；新建/切换逻辑后续再接） */
 const conversations = ref(getDataList())
 const currentId = ref(getCurrentId())
+onMounted(() => {
+  if(currentId.value && conversations.value.length) {
+    selectConversation(currentId.value)
+  }
+})
 
 const formatHistoryTime = (ts) => {
   if (!ts) return ''
@@ -244,6 +249,23 @@ const createConversation = () => {
   conversations.value = getDataList()
   currentId.value = conversations.value.at(-1).id
 }
+
+// 选择对话
+const selectConversation = id => {
+  const item = conversations.value.find(
+    (c) => String(c.id) === String(id)
+  )
+  if (!item) {
+    // 脏 currentId：清掉或切到第一条
+    currentId.value = conversations.value[0]?.id ?? null
+    messages.value = conversations.value[0]?.messages
+      ? [...conversations.value[0].messages]
+      : []
+    return
+  }
+  currentId.value = id
+  messages.value = Array.isArray(item.messages) ? [...item.messages] : []
+}
 </script>
 <template>
   <div class="page">
@@ -268,6 +290,7 @@ const createConversation = () => {
           class="history-item"
           :class="{ active: String(item.id) === String(currentId) }"
           :title="item.title || '新对话'"
+          @click="selectConversation(item.id)"
         >
           <el-icon class="history-icon" :size="18"><ChatDotRound /></el-icon>
           <div class="history-meta">
@@ -285,7 +308,7 @@ const createConversation = () => {
         :title="isExpanded ? '收起侧栏' : '展开侧栏'"
         @click="isExpanded = !isExpanded"
       >
-        <el-icon :size="22">
+        <el-icon :size="20">
           <Fold v-if="isExpanded" />
           <Expand v-else />
         </el-icon>
