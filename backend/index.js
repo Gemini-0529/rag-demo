@@ -5,7 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { indexDocument } from './lib/indexDocument.js'
-import { getChunkCount } from './lib/store.js'
+import { getChunkCount, getIndexedSource } from './lib/store.js'
 import { askQuestion, askQuestionStream } from './lib/ask.js'
 
 // 拿到当前 index.js 所在目录（ESM 没有 __dirname，需要自己算）
@@ -50,12 +50,14 @@ app.listen(8889, () => {
 })
 
 
-/** 可选：前端轮询是否已有索引、有多少段 */
+/** 可选：前端轮询是否已有索引、有多少段（刷新页面可用来恢复「已导入」状态） */
 app.get('/status', (_req, res) => {
+  const chunkCount = getChunkCount()
   res.json({
     code: 200,
-    hasDocument: getChunkCount() > 0,
-    chunkCount: getChunkCount(),
+    hasDocument: chunkCount > 0,
+    chunkCount,
+    filename: getIndexedSource() || null,
   })
 })
 

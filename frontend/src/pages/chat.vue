@@ -3,6 +3,7 @@ import { nextTick, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import UploadFile from '../components/uploadFile.vue'
+import axios from '../axios'
 import { getCurrentId, getDataList, createData, updateData } from '../stores/handleData.js'
 
 marked.setOptions({
@@ -15,6 +16,21 @@ const renderMarkdown = (text) => marked.parse(String(text || ''))
 const fileList = ref([])
 const updateFileList = (list) => {
   fileList.value = list
+}
+
+/** 刷新后若后端索引还在，恢复顶栏「已导入」提示（不重建向量） */
+const restoreDocumentStatus = async () => {
+  try {
+    const data = await axios.get('/status')
+    if (data?.hasDocument) {
+      fileList.value = [{
+        name: data.filename || '已索引文档',
+        url: '',
+      }]
+    }
+  } catch {
+    // 后端未启动时忽略，保持「待导入」
+  }
 }
 
 const question = ref('')
@@ -219,7 +235,8 @@ const isExpanded = ref(true)
 const conversations = ref(getDataList())
 const currentId = ref(getCurrentId())
 onMounted(() => {
-  if(currentId.value && conversations.value.length) {
+  restoreDocumentStatus()
+  if (currentId.value && conversations.value.length) {
     selectConversation(currentId.value)
   }
 })
@@ -241,13 +258,20 @@ const formatHistoryTime = (ts) => {
 
 // 新建对话
 const createConversation = () => {
-  currentId.value = Date.now()
-  const title = '新对话'
-  const updatedAt = currentId.value
-  const messages = []
-  createData(currentId.value, { title, updatedAt, messages })
+  if (loading.value) return
+  // 先保存当前会话（若有内容）
+  if (currentId.value && messages.value.length) {
+    updateData(currentId.value, {
+      messages: messages.value,
+      updatedAt: Date.now(),
+    })
+  }
+  const id = Date.now()
+  // 注意：勿用局部变量名 messages，会遮蔽页面上的 messages ref
+  createData(id, { title: '新对话', updatedAt: id, messages: [] })
   conversations.value = getDataList()
-  currentId.value = conversations.value.at(-1).id
+  currentId.value = id
+  messages.value = [] // 清空当前消息数据，避免新建后，保留了上次的上下文
 }
 
 // 选择对话

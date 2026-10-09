@@ -27,6 +27,11 @@ export function getChunkCount() {
   return chunks.length
 }
 
+/** 当前索引对应的文档名（MVP 一份文档，取首条 source） */
+export function getIndexedSource() {
+  return chunks[0]?.source || ''
+}
+
 /** 取出全部（调试 / status 接口用） */
 export function getAllChunks() {
   return chunks
