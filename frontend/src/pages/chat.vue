@@ -38,6 +38,16 @@ const loading = ref(false)
 /** @type {import('vue').Ref<Array<{ role: 'user' | 'assistant', content: string, citations?: any[] }>>} */
 const messages = ref([])
 const messagesRef = ref(null)
+/** 当前流式请求的中止控制器 */
+let askAbort = null
+
+const stopGeneration = () => {
+  askAbort?.abort()
+  askAbort = null
+}
+
+const isAbortError = (err) =>
+  err?.name === 'AbortError' || err?.code === 20
 
 /** 滚动到消息区底部，保证流式生成内容始终可见 */
 const scrollToBottom = async () => {
@@ -64,7 +74,7 @@ const copyAnswer = async (text) => {
 /**
  * 读 SSE：后端按行推送 data: {...}
  */
-async function readAskStream(questionText, onEvent) {
+async function readAskStream(questionText, onEvent, signal) {
   const res = await fetch('/api/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -75,6 +85,7 @@ async function readAskStream(questionText, onEvent) {
         .map((m) => ({role: m.role, content: m.content.trim()})), // 去掉回答的 citations 数据
       stream: true
     }),
+    signal,
   })
 
   if (!res.ok) {
@@ -93,6 +104,10 @@ async function readAskStream(questionText, onEvent) {
   let buffer = ''
 
   while (true) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => {})
+      throw new DOMException('Aborted', 'AbortError')
+    }
     const { done, value } = await reader.read()
     if (done) break
 
@@ -128,6 +143,7 @@ const sendMessage = async () => {
   messages.value.push({ role: 'user', content: q })
   question.value = ''
   loading.value = true
+  askAbort = new AbortController()
   scrollToBottom()
   // 先插入空的助手气泡，后续边收边追加文字（必须改 messages 里的项，保证响应式）
   messages.value.push({ role: 'assistant', content: '', citations: [] })
@@ -147,19 +163,26 @@ const sendMessage = async () => {
       } else if (event.type === 'error') {
         throw new Error(event.message || '问答失败')
       }
-    })
+    }, askAbort.signal)
     scrollToBottom()
-    
   } catch (err) {
-    ElMessage.error(err.message || '问答失败')
     const msg = messages.value[assistantIndex]
-    if(msg) {
-      msg.content = msg.content?.trim()
-        ? msg.content
-        : '回答出现了小差错，请重试。'
-      msg.citations = []
+    if (isAbortError(err)) {
+      if (msg && !msg.content?.trim()) {
+        msg.content = '已停止生成'
+        msg.citations = []
+      }
+    } else {
+      ElMessage.error(err.message || '问答失败')
+      if (msg) {
+        msg.content = msg.content?.trim()
+          ? msg.content
+          : '回答出现了小差错，请重试。'
+        msg.citations = []
+      }
     }
   } finally {
+    askAbort = null
     loading.value = false
     // 更新对话数据
     if (!currentId.value) return
@@ -193,6 +216,7 @@ const regenerateAnswer = async (idx) => {
   const question = messages.value.at(idx - 1)
   if(question && question.role === 'user') {
     loading.value = true
+    askAbort = new AbortController()
     messages.value = messages.value.slice(0, idx) // 把后面的对话全删掉，避免上下文数据不对
     messages.value.push({ role: 'assistant', content: '', citations: [] })
     const assistantIndex = messages.value.length - 1
@@ -210,22 +234,36 @@ const regenerateAnswer = async (idx) => {
         } else if (event.type === 'error') {
           throw new Error(event.message || '问答失败')
         }
-      })
+      }, askAbort.signal)
       scrollToBottom()
     } catch (err) {
-      ElMessage.error(err.message || '问答失败')
       const msg = messages.value[assistantIndex]
-      if(msg) {
-        msg.content = msg.content?.trim()
-          ? msg.content
-          : '回答出现了小差错，请重试。'
-        msg.citations = []
+      if (isAbortError(err)) {
+        if (msg && !msg.content?.trim()) {
+          msg.content = '已停止生成'
+          msg.citations = []
+        }
+      } else {
+        ElMessage.error(err.message || '问答失败')
+        if (msg) {
+          msg.content = msg.content?.trim()
+            ? msg.content
+            : '回答出现了小差错，请重试。'
+          msg.citations = []
+        }
       }
     } finally {
+      askAbort = null
       loading.value = false
+      if (currentId.value) {
+        updateData(currentId.value, {
+          messages: messages.value,
+          updatedAt: Date.now(),
+        })
+        conversations.value = getDataList()
+      }
     }
   }
-  
 }
 
 /** 侧栏是否展开；收起时只显示图标，悬停看完整标题 */
@@ -452,7 +490,20 @@ const updateTitle = (item) => {
             :disabled="loading"
             @keydown.enter.exact.prevent="sendMessage"
           />
-          <el-button class="send-btn" :loading="loading" @click="sendMessage">发送</el-button>
+          <el-button
+            v-if="!loading"
+            class="send-btn"
+            @click="sendMessage"
+          >
+            发送
+          </el-button>
+          <el-button
+            v-else
+            class="stop-btn"
+            @click="stopGeneration"
+          >
+            停止
+          </el-button>
         </div>
       </footer>
     </div>
@@ -993,7 +1044,8 @@ footer {
       color: #8aa0b8;
     }
 
-    .send-btn {
+    .send-btn,
+    .stop-btn {
       align-self: flex-end;
       height: 40px;
       padding: 0 20px;
@@ -1001,10 +1053,21 @@ footer {
       border-radius: 12px;
       color: #fff;
       font-weight: 700;
+    }
+
+    .send-btn {
       background: linear-gradient(135deg, #2b7fff, #3ab4ff);
       &:hover, &:focus {
         color: #fff;
         background: linear-gradient(135deg, #1f6feb, #2aa3ef);
+      }
+    }
+
+    .stop-btn {
+      background: linear-gradient(135deg, #6b7c93, #8a9bb0);
+      &:hover, &:focus {
+        color: #fff;
+        background: linear-gradient(135deg, #5a6a80, #7a8b9e);
       }
     }
   }
