@@ -290,6 +290,19 @@ const selectConversation = id => {
   currentId.value = id
   messages.value = Array.isArray(item.messages) ? [...item.messages] : []
 }
+// 双击标题，进入编辑状态
+const isUpdateTitle = ref(false)
+const dbClickId = ref(null)
+const handleDoubleClickTitle = id => {
+  dbClickId.value = id
+  isUpdateTitle.value = true
+}
+const updateTitle = (item) => {
+  isUpdateTitle.value = false
+  updateData(item.id, { title: (item.title || '').trim() || '新对话' })
+  conversations.value = getDataList()
+  dbClickId.value = null
+}
 </script>
 <template>
   <div class="page">
@@ -314,11 +327,18 @@ const selectConversation = id => {
           class="history-item"
           :class="{ active: String(item.id) === String(currentId) }"
           :title="item.title || '新对话'"
-          @click="selectConversation(item.id)"
+          @click="!isUpdateTitle && selectConversation(item.id)"
+          @dblclick="handleDoubleClickTitle(item.id)"
         >
           <el-icon class="history-icon" :size="18"><ChatDotRound /></el-icon>
           <div class="history-meta">
-            <span class="history-title">{{ item.title || '新对话' }}</span>
+            <el-input
+              v-if="isUpdateTitle && dbClickId === item.id"
+              v-model="item.title"
+              @blur="updateTitle(item)"
+              @keydown.enter.prevent="e => e.target.blur()"
+            ></el-input>
+            <span class="history-title" v-else>{{ item.title || '新对话' }}</span>
             <span class="history-time">{{ formatHistoryTime(item.updatedAt) }}</span>
           </div>
         </li>
