@@ -1,3 +1,6 @@
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 /**
  * 第一版向量库：进程内数组。
  * 服务重启后索引会清空，MVP 可接受；不做 Chroma / 数据库。
@@ -12,6 +15,7 @@ let chunks = []
 /** 清空索引（新文档上传时，MVP 只保留当前这一份文档） */
 export function clearChunks() {
   chunks = []
+  saveChunks()
 }
 
 /**
@@ -20,6 +24,7 @@ export function clearChunks() {
  */
 export function addChunks(list) {
   chunks.push(...list)
+  saveChunks()
 }
 
 /** 当前已索引的片段数量 */
@@ -104,3 +109,25 @@ export function searchTopK(queryEmbedding, topK = 3) {
   // 取前 topK 个
   return scored.slice(0, topK)
 }
+
+// 存储向量数据                          拿到当前文件的路径
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const dataPath = path.join(__dirname, '..', 'data', 'chunks.json')
+export function saveChunks() {
+  try {
+    fs.writeFileSync(dataPath, JSON.stringify(chunks, null, 2))
+  } catch(err) {
+    console.error('Error saving chunks:', err)
+    throw err
+  }
+}
+
+function loadChunks() {
+  if (!fs.existsSync(dataPath)) {
+    chunks = []
+    return
+  }
+  chunks = JSON.parse(fs.readFileSync(dataPath, 'utf-8')) || []
+}
+
+loadChunks() // 文件加载时执行一次
