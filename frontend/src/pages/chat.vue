@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import UploadFile from '../components/uploadFile.vue'
 import axios from '../axios'
-import { getCurrentId, getDataList, createData, updateData } from '../stores/handleData.js'
+import { getCurrentId, getDataList, createData, updateData, delData, setCurrentId } from '../stores/handleData.js'
 
 marked.setOptions({
   gfm: true,
@@ -341,6 +341,21 @@ const updateTitle = (item) => {
   conversations.value = getDataList()
   dbClickId.value = null
 }
+
+const deleteConversation = id => {
+  if(loading.value) return
+
+  delData(id)
+  conversations.value = getDataList()
+  if (String(currentId.value) === String(id)) {
+    currentId.value = conversations.value[0]?.id ?? null
+    messages.value = conversations.value[0]?.messages
+      ? [...conversations.value[0].messages]
+      : []
+
+    setCurrentId(currentId.value)
+  }
+}
 </script>
 <template>
   <div class="page">
@@ -379,6 +394,7 @@ const updateTitle = (item) => {
             <span class="history-title" v-else>{{ item.title || '新对话' }}</span>
             <span class="history-time">{{ formatHistoryTime(item.updatedAt) }}</span>
           </div>
+          <el-icon class="delete-icon" :size="18" @click.stop="deleteConversation(item.id)" v-if="isExpanded"><Delete /></el-icon>
         </li>
         <li v-if="isExpanded && !conversations.length" class="history-empty">
           暂无历史对话
@@ -664,6 +680,9 @@ const updateTitle = (item) => {
 
   &:hover {
     background: rgba(43, 140, 255, 0.06);
+    .delete-icon {
+      display: block;
+    }
   }
 
   &.active {
@@ -702,6 +721,12 @@ const updateTitle = (item) => {
   .history-time {
     font-size: 11px;
     color: #8aa0b8;
+  }
+
+  .delete-icon  {
+    display: none;
+    cursor: pointer;
+    margin: 6px;
   }
 }
 
