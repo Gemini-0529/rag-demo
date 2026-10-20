@@ -12,9 +12,12 @@ import { askQuestion, askQuestionStream } from './lib/ask.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 上传文件最终落盘目录，例如 backend/files
 const filesDir = path.join(__dirname, 'files')
+// Markdown 导出目录（与 tools/exportMarkdown.js 一致）
+const exportsDir = path.join(__dirname, 'exports')
 
 // recursive: true → 目录已存在不报错；不存在则逐级创建
 fs.mkdirSync(filesDir, { recursive: true })
+fs.mkdirSync(exportsDir, { recursive: true })
 
 /**
  * multer.diskStorage：告诉 multer「不要放内存，写到磁盘」
@@ -150,3 +153,6 @@ app.post('/ask', async (req, res) => {
     res.end()
   }
 })
+
+// 把 backend/exports 挂到 /downloads，前端用返回的 url 直接下载
+app.use('/downloads', express.static(exportsDir))
